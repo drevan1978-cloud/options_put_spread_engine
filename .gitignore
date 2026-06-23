@@ -1,0 +1,13 @@
+.pytest_cache/
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+*.duckdb
+*.sqlite
+data/raw/*
+data/processed/*
+logs/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!logs/.gitkeep

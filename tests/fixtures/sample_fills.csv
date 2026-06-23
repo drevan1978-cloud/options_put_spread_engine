@@ -1,0 +1,3 @@
+ticket_id,position_id,filled_at,quantity,price,source
+1,,2026-06-19T15:01:00+00:00,1,1.55,manual_csv
+,2,2026-06-19T15:05:00+00:00,1,1.60,manual_csv

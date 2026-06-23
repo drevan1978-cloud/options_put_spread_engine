@@ -1,0 +1,9 @@
+risk_limits:
+  max_risk_per_trade_cluster_pct: 0.01
+  max_risk_per_expiration_pct: 0.03
+  max_total_portfolio_heat_pct: 0.06
+  max_weekly_loss_pct: 0.02
+  max_monthly_drawdown_pct: 0.05
+  max_consecutive_stopped_baskets: 2
+  allow_martingale: false
+  allow_live_orders: false

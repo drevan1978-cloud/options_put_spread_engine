@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "options-put-spread-engine"
+version = "0.1.0"
+description = "Scaffold for an auditable defined-risk put spread decision-support engine."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "duckdb>=1.0",
+    "numpy>=1.26",
+    "pandas>=2.2",
+    "pydantic>=2.0",
+    "pytest>=8.0",
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+options-engine = "options_engine.main:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q"
