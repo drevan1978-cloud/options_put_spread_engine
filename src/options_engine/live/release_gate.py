@@ -671,14 +671,21 @@ def _account_equity_check(
     config_version = _evidence_config_version(evidence_payload)
     row = connection.execute(
         """
-        SELECT account_equity, as_of, config_version
+        SELECT account_equity, as_of, config_version, created_at
         FROM risk_snapshots
+        WHERE as_of <= ?
+          AND created_at <= ?
         ORDER BY as_of DESC, id DESC
         LIMIT 1
-        """
+        """,
+        (generated_at.isoformat(), generated_at.isoformat()),
     ).fetchone()
     if row is None:
-        return _failed("Account Equity", ReleaseGateReasonCode.ACCOUNT_EQUITY_MISSING, "No risk snapshot found")
+        return _failed(
+            "Account Equity",
+            ReleaseGateReasonCode.ACCOUNT_EQUITY_MISSING,
+            "No risk snapshot found at or before release gate timestamp",
+        )
     try:
         account_equity = Decimal(str(row[0]))
     except (InvalidOperation, ValueError):

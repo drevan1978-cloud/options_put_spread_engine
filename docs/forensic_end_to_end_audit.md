@@ -20,6 +20,7 @@ Remediation update:
 - P9 release-gate rule-violation as-of checks were fixed after this audit. The release gate now counts live-pilot rule violations at or before the gate timestamp, preventing future-dated violations from rewriting a prior gate evaluation. Full-suite baseline after this fix: `264 passed in 3.97s`.
 - P10 pilot evidence packet as-of generation was fixed after this audit. Evidence packet generation now derives session state, audit events, fill rows, slippage events, rule violations, signoffs, and dashboard event counts from records at or before `generated_at`. Full-suite baseline after this fix: `265 passed in 4.29s`.
 - P11 live dashboard and daily-report intraday as-of filtering was fixed after this audit. Dashboard generation now passes `generated_at` through daily-report loaders and same-day counters so future risk snapshots, fills, audit events, config-lock state, and shutdown state are excluded. Full-suite baseline after this fix: `266 passed in 5.77s`.
+- P12 release-gate account-equity snapshot selection was fixed after this audit. The gate now selects the latest risk snapshot available at or before the gate timestamp instead of allowing a later risk snapshot to rewrite a prior release-gate evaluation. Full-suite baseline after this fix: `267 passed in 4.20s`.
 
 ## Findings
 
@@ -145,9 +146,17 @@ Impact: an intraday dashboard or daily report could include future same-day fill
 
 Status: fixed. Daily-report database loaders now support an optional timezone-aware `as_of` boundary, and live dashboard generation applies `generated_at` to daily report input, emergency shutdown state, config lock state, live-fill counts, classification counts, and rule-violation counts.
 
+### P12 - Release gate account-equity check selected future risk snapshots
+
+`_account_equity_check(...)` ordered all `risk_snapshots` by `as_of` and selected the newest row in the database before comparing it with the release-gate timestamp.
+
+Impact: a future risk snapshot could make a prior release-gate evaluation fail even when a valid account-equity snapshot existed at the gate timestamp. This weakened historical replay because later records could rewrite the gate outcome.
+
+Status: fixed. The release gate now selects only risk snapshots with `as_of` and `created_at` at or before `generated_at`; if no such snapshot exists, it fails with an explicit account-equity missing reason.
+
 ## Positive Controls Verified
 
-- Full pytest suite passed after remediation: `266 passed in 5.77s`.
+- Full pytest suite passed after remediation: `267 passed in 4.20s`.
 - Compile smoke check passed after remediation: `python -m compileall -q src tests`.
 - No broker SDK/network execution dependency was found in source dependencies.
 - Pre-pilot static tests already reject broker submission patterns, market-order flags set true, auto-execution flags set true, martingale requests, and fantasy mid-only backtests.
@@ -175,4 +184,4 @@ The original audit report was generated outside the project folder. This reposit
 
 ## Recommended Next Action
 
-The P1, P2, P3, P4, P5, P6, P7, P8, P9, P10, and P11 findings from this report are now remediated. Continue the forensic pass with the next highest-risk surface before adding new live-pilot functionality.
+The P1, P2, P3, P4, P5, P6, P7, P8, P9, P10, P11, and P12 findings from this report are now remediated. Continue the forensic pass with the next highest-risk surface before adding new live-pilot functionality.

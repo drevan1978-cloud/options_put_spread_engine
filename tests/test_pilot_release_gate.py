@@ -336,11 +336,30 @@ def test_release_gate_future_account_equity_snapshot_is_no_go(tmp_path: Path) ->
     report = evaluate_pilot_release_gate(_gate_input(demo.database_path, demo.readiness_report_path, demo.evidence_packet_path))
 
     assert report.status == ReleaseGateStatus.NO_GO
-    assert ReleaseGateReasonCode.ACCOUNT_EQUITY_NOT_VERIFIED.value in report.blocking_reason_codes
+    assert ReleaseGateReasonCode.ACCOUNT_EQUITY_MISSING.value in report.blocking_reason_codes
     assert (
-        _check_message(report, ReleaseGateReasonCode.ACCOUNT_EQUITY_NOT_VERIFIED.value)
-        == "Latest risk snapshot is after the release gate timestamp"
+        _check_message(report, ReleaseGateReasonCode.ACCOUNT_EQUITY_MISSING.value)
+        == "No risk snapshot found at or before release gate timestamp"
     )
+
+
+def test_release_gate_future_account_equity_snapshot_does_not_block_prior_gate(tmp_path: Path) -> None:
+    demo = _build_demo(tmp_path)
+
+    with connect_database(demo.database_path) as connection:
+        _insert_risk_snapshot(
+            connection,
+            as_of="2026-06-20T17:00:00+00:00",
+            account_equity="0",
+            config_version="other-config",
+            created_at="2026-06-20T17:00:00+00:00",
+        )
+
+    report = evaluate_pilot_release_gate(_gate_input(demo.database_path, demo.readiness_report_path, demo.evidence_packet_path))
+
+    assert report.status == ReleaseGateStatus.GO
+    assert ReleaseGateReasonCode.ACCOUNT_EQUITY_MISSING.value not in report.blocking_reason_codes
+    assert ReleaseGateReasonCode.ACCOUNT_EQUITY_NOT_VERIFIED.value not in report.blocking_reason_codes
 
 
 def test_release_gate_missing_runbook_acknowledgement_requires_review(tmp_path: Path) -> None:
@@ -531,5 +550,30 @@ def _mutate_latest_config_lock(
     connection.execute(
         "UPDATE audit_log SET payload_json = ?, created_at = ? WHERE id = ?",
         (json.dumps(payload, sort_keys=True), created_at, row[0]),
+    )
+    connection.commit()
+
+
+def _insert_risk_snapshot(
+    connection: object,
+    *,
+    as_of: str,
+    account_equity: str,
+    config_version: str,
+    created_at: str,
+) -> None:
+    connection.execute(
+        """
+        INSERT INTO risk_snapshots (
+            as_of,
+            account_equity,
+            portfolio_heat,
+            details_json,
+            config_version,
+            created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (as_of, account_equity, "0.00", "{}", config_version, created_at),
     )
     connection.commit()
