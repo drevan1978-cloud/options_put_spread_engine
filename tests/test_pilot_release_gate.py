@@ -246,7 +246,7 @@ def test_release_gate_future_position_reconciliation_is_no_go(tmp_path: Path) ->
         _mutate_latest_position_reconciliation(
             connection,
             checked_at="2026-06-20T17:00:00+00:00",
-            created_at="2026-06-20T17:00:00+00:00",
+            created_at="2026-06-20T15:55:00+00:00",
         )
 
     report = evaluate_pilot_release_gate(_gate_input(demo.database_path, demo.readiness_report_path, demo.evidence_packet_path))
@@ -257,6 +257,24 @@ def test_release_gate_future_position_reconciliation_is_no_go(tmp_path: Path) ->
         _check_message(report, ReleaseGateReasonCode.OPEN_POSITIONS_NOT_VERIFIED.value)
         == "Position reconciliation is after the release gate timestamp"
     )
+
+
+def test_release_gate_future_position_reconciliation_event_does_not_block_prior_gate(tmp_path: Path) -> None:
+    demo = _build_demo(tmp_path)
+
+    with connect_database(demo.database_path) as connection:
+        _insert_position_reconciliation_event(
+            connection,
+            event_type="POSITION_RECONCILIATION_UNVERIFIED",
+            checked_at="2026-06-20T17:00:00+00:00",
+            created_at="2026-06-20T17:00:00+00:00",
+            open_risk_verified=False,
+        )
+
+    report = evaluate_pilot_release_gate(_gate_input(demo.database_path, demo.readiness_report_path, demo.evidence_packet_path))
+
+    assert report.status == ReleaseGateStatus.GO
+    assert ReleaseGateReasonCode.OPEN_POSITIONS_NOT_VERIFIED.value not in report.blocking_reason_codes
 
 
 def test_release_gate_position_reconciliation_after_evidence_is_no_go(tmp_path: Path) -> None:
@@ -575,5 +593,49 @@ def _insert_risk_snapshot(
         VALUES (?, ?, ?, ?, ?, ?)
         """,
         (as_of, account_equity, "0.00", "{}", config_version, created_at),
+    )
+    connection.commit()
+
+
+def _insert_position_reconciliation_event(
+    connection: object,
+    *,
+    event_type: str,
+    checked_at: str,
+    created_at: str,
+    open_risk_verified: bool,
+) -> None:
+    payload = {
+        "metadata": {
+            "status": event_type.removeprefix("POSITION_RECONCILIATION_"),
+            "reason_codes": ["TEST_EVENT"],
+            "open_position_ids": [],
+            "missing_position_ids": [],
+            "open_risk_verified": open_risk_verified,
+            "black_state_required": not open_risk_verified,
+            "checked_at": checked_at,
+            "config_version": "demo-config-v1",
+        }
+    }
+    connection.execute(
+        """
+        INSERT INTO audit_log (
+            event_type,
+            entity_type,
+            message,
+            payload_json,
+            config_version,
+            created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            event_type,
+            "position_reconciliation",
+            "future test reconciliation event",
+            json.dumps(payload, sort_keys=True),
+            "demo-config-v1",
+            created_at,
+        ),
     )
     connection.commit()

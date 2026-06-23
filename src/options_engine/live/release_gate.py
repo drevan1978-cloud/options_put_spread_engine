@@ -741,15 +741,17 @@ def _position_reconciliation_check(
         SELECT event_type, payload_json
         FROM audit_log
         WHERE event_type IN ('POSITION_RECONCILIATION_VERIFIED', 'POSITION_RECONCILIATION_UNVERIFIED')
+          AND created_at <= ?
         ORDER BY created_at DESC, id DESC
         LIMIT 1
-        """
+        """,
+        (generated_at.isoformat(),),
     ).fetchone()
     if row is None:
         return _failed(
             "Position Reconciliation",
             ReleaseGateReasonCode.OPEN_POSITIONS_NOT_VERIFIED,
-            "No position reconciliation audit event found",
+            "No position reconciliation audit event found at or before release gate timestamp",
         )
 
     event_type = str(row[0])

@@ -21,6 +21,7 @@ Remediation update:
 - P10 pilot evidence packet as-of generation was fixed after this audit. Evidence packet generation now derives session state, audit events, fill rows, slippage events, rule violations, signoffs, and dashboard event counts from records at or before `generated_at`. Full-suite baseline after this fix: `265 passed in 4.29s`.
 - P11 live dashboard and daily-report intraday as-of filtering was fixed after this audit. Dashboard generation now passes `generated_at` through daily-report loaders and same-day counters so future risk snapshots, fills, audit events, config-lock state, and shutdown state are excluded. Full-suite baseline after this fix: `266 passed in 5.77s`.
 - P12 release-gate account-equity snapshot selection was fixed after this audit. The gate now selects the latest risk snapshot available at or before the gate timestamp instead of allowing a later risk snapshot to rewrite a prior release-gate evaluation. Full-suite baseline after this fix: `267 passed in 4.20s`.
+- P13 release-gate position-reconciliation event selection was fixed after this audit. The gate now selects the latest reconciliation audit event created at or before the gate timestamp instead of allowing later reconciliation events to rewrite a prior release-gate evaluation. Full-suite baseline after this fix: `268 passed in 5.34s`.
 
 ## Findings
 
@@ -154,9 +155,17 @@ Impact: a future risk snapshot could make a prior release-gate evaluation fail e
 
 Status: fixed. The release gate now selects only risk snapshots with `as_of` and `created_at` at or before `generated_at`; if no such snapshot exists, it fails with an explicit account-equity missing reason.
 
+### P13 - Release gate position reconciliation selected future audit events
+
+`_position_reconciliation_check(...)` ordered all position-reconciliation audit events by `created_at` and selected the newest row in the database without constraining it to the release-gate timestamp.
+
+Impact: a later `POSITION_RECONCILIATION_UNVERIFIED` or future reconciliation event could rewrite a prior gate evaluation even when the database had valid verified reconciliation evidence at the actual gate time.
+
+Status: fixed. The release gate now considers only reconciliation audit events created at or before `generated_at`, while still rejecting malformed rows whose embedded `checked_at` is after the gate or evidence packet.
+
 ## Positive Controls Verified
 
-- Full pytest suite passed after remediation: `267 passed in 4.20s`.
+- Full pytest suite passed after remediation: `268 passed in 5.34s`.
 - Compile smoke check passed after remediation: `python -m compileall -q src tests`.
 - No broker SDK/network execution dependency was found in source dependencies.
 - Pre-pilot static tests already reject broker submission patterns, market-order flags set true, auto-execution flags set true, martingale requests, and fantasy mid-only backtests.
@@ -184,4 +193,4 @@ The original audit report was generated outside the project folder. This reposit
 
 ## Recommended Next Action
 
-The P1, P2, P3, P4, P5, P6, P7, P8, P9, P10, P11, and P12 findings from this report are now remediated. Continue the forensic pass with the next highest-risk surface before adding new live-pilot functionality.
+The P1, P2, P3, P4, P5, P6, P7, P8, P9, P10, P11, P12, and P13 findings from this report are now remediated. Continue the forensic pass with the next highest-risk surface before adding new live-pilot functionality.
