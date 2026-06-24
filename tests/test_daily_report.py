@@ -148,6 +148,88 @@ def test_daily_report_loads_records_from_database(tmp_path: Path) -> None:
     }
 
 
+def test_daily_report_as_of_excludes_future_created_backfilled_records(tmp_path: Path) -> None:
+    database_path = tmp_path / "engine.sqlite"
+    initialize_database(database_path)
+
+    with connect_database(database_path) as connection:
+        _insert_risk_snapshot(
+            connection,
+            as_of="2026-06-20T14:00:00+00:00",
+            account_equity="100000",
+            created_at="2026-06-20T14:01:00+00:00",
+        )
+        _insert_risk_snapshot(
+            connection,
+            as_of="2026-06-20T15:00:00+00:00",
+            account_equity="200000",
+            created_at="2026-06-20T17:00:00+00:00",
+        )
+        position_id = insert_position(
+            connection,
+            _position(created_at=datetime(2026, 6, 20, 17, 0, tzinfo=UTC)),
+        )
+        insert_fill(
+            connection,
+            _fill(
+                position_id=position_id,
+                ticket_id=None,
+                filled_at=datetime(2026, 6, 20, 15, 0, tzinfo=UTC),
+                created_at=datetime(2026, 6, 20, 17, 0, tzinfo=UTC),
+            ),
+        )
+
+        early_report = build_daily_report_from_database(
+            connection,
+            report_date=date(2026, 6, 20),
+            as_of=datetime(2026, 6, 20, 16, 0, tzinfo=UTC),
+        )
+        later_report = build_daily_report_from_database(
+            connection,
+            report_date=date(2026, 6, 20),
+            as_of=datetime(2026, 6, 20, 18, 0, tzinfo=UTC),
+        )
+
+    assert early_report.account_equity == "100000"
+    assert early_report.fills_recorded == 0
+    assert early_report.open_positions == 0
+    assert later_report.account_equity == "200000"
+    assert later_report.fills_recorded == 1
+    assert later_report.open_positions == 1
+
+
+def test_daily_report_as_of_treats_later_closed_position_as_open_before_close(tmp_path: Path) -> None:
+    database_path = tmp_path / "engine.sqlite"
+    initialize_database(database_path)
+
+    with connect_database(database_path) as connection:
+        position_id = insert_position(
+            connection,
+            _position(
+                status="CLOSED",
+                closed_at=datetime(2026, 6, 20, 17, 0, tzinfo=UTC),
+            ),
+        )
+        insert_fill(connection, _fill(position_id=position_id, ticket_id=None))
+
+        before_close = build_daily_report_from_database(
+            connection,
+            report_date=date(2026, 6, 20),
+            as_of=datetime(2026, 6, 20, 16, 0, tzinfo=UTC),
+        )
+        after_close = build_daily_report_from_database(
+            connection,
+            report_date=date(2026, 6, 20),
+            as_of=datetime(2026, 6, 20, 18, 0, tzinfo=UTC),
+        )
+
+    assert before_close.open_positions == 1
+    assert before_close.open_position_details[0]["status"] == "OPEN"
+    assert before_close.open_max_loss == "345.00"
+    assert after_close.open_positions == 0
+    assert after_close.open_max_loss == "0"
+
+
 def test_daily_risk_report_from_database_includes_required_fields_and_json_output(tmp_path: Path) -> None:
     database_path = tmp_path / "engine.sqlite"
     output_path = tmp_path / "daily_report.json"
@@ -304,30 +386,43 @@ def _ticket(status: str = "DRAFT", candidate_id: int | None = 1) -> TradeTicket:
     )
 
 
-def _fill(*, position_id: int | None = None, ticket_id: int | None = 1) -> Fill:
+def _fill(
+    *,
+    position_id: int | None = None,
+    ticket_id: int | None = 1,
+    filled_at: datetime | None = None,
+    created_at: datetime | None = None,
+) -> Fill:
     return Fill(
         ticket_id=ticket_id,
         position_id=position_id,
-        filled_at=datetime(2026, 6, 20, 15, 1, tzinfo=UTC),
+        filled_at=filled_at or datetime(2026, 6, 20, 15, 1, tzinfo=UTC),
         quantity=1,
         price=Decimal("1.55"),
         source="manual_test",
         config_version="test-config",
-        created_at=datetime(2026, 6, 20, 15, 2, tzinfo=UTC),
+        created_at=created_at or datetime(2026, 6, 20, 15, 2, tzinfo=UTC),
     )
 
 
-def _position(status: str = "OPEN") -> Position:
+def _position(
+    status: str = "OPEN",
+    *,
+    opened_at: datetime | None = None,
+    closed_at: datetime | None = None,
+    created_at: datetime | None = None,
+) -> Position:
     return Position(
         symbol="SPY",
-        opened_at=datetime(2026, 6, 20, 15, 1, tzinfo=UTC),
+        opened_at=opened_at or datetime(2026, 6, 20, 15, 1, tzinfo=UTC),
         quantity=1,
         short_put_strike=Decimal("540"),
         long_put_strike=Decimal("535"),
         expiration_date=date(2026, 7, 24),
         status=status,
         config_version="test-config",
-        created_at=datetime(2026, 6, 20, 15, 2, tzinfo=UTC),
+        closed_at=closed_at,
+        created_at=created_at or datetime(2026, 6, 20, 15, 2, tzinfo=UTC),
     )
 
 
@@ -370,7 +465,13 @@ def _regime_state() -> RegimeState:
     )
 
 
-def _insert_risk_snapshot(connection: sqlite3.Connection) -> None:
+def _insert_risk_snapshot(
+    connection: sqlite3.Connection,
+    *,
+    as_of: str = "2026-06-20T14:00:00+00:00",
+    account_equity: str = "100000",
+    created_at: str = "2026-06-20T14:01:00+00:00",
+) -> None:
     connection.execute(
         """
         INSERT INTO risk_snapshots (
@@ -384,8 +485,8 @@ def _insert_risk_snapshot(connection: sqlite3.Connection) -> None:
         VALUES (?, ?, ?, ?, ?, ?)
         """,
         (
-            "2026-06-20T14:00:00+00:00",
-            "100000",
+            as_of,
+            account_equity,
             "0.00345",
             json.dumps(
                 {
@@ -396,7 +497,7 @@ def _insert_risk_snapshot(connection: sqlite3.Connection) -> None:
                 sort_keys=True,
             ),
             "test-config",
-            "2026-06-20T14:01:00+00:00",
+            created_at,
         ),
     )
     connection.commit()

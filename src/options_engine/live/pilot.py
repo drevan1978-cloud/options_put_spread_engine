@@ -363,6 +363,7 @@ class LiveFillEntry:
             price=self.price,
             source=self.source,
             config_version=config_version,
+            created_at=self.filled_at,
         )
 
     def slippage_record(self, fill_id: int | None = None) -> SlippageRecord:

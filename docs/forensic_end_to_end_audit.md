@@ -22,6 +22,7 @@ Remediation update:
 - P11 live dashboard and daily-report intraday as-of filtering was fixed after this audit. Dashboard generation now passes `generated_at` through daily-report loaders and same-day counters so future risk snapshots, fills, audit events, config-lock state, and shutdown state are excluded. Full-suite baseline after this fix: `266 passed in 5.77s`.
 - P12 release-gate account-equity snapshot selection was fixed after this audit. The gate now selects the latest risk snapshot available at or before the gate timestamp instead of allowing a later risk snapshot to rewrite a prior release-gate evaluation. Full-suite baseline after this fix: `267 passed in 4.20s`.
 - P13 release-gate position-reconciliation event selection was fixed after this audit. The gate now selects the latest reconciliation audit event created at or before the gate timestamp instead of allowing later reconciliation events to rewrite a prior release-gate evaluation. Full-suite baseline after this fix: `268 passed in 5.34s`.
+- P14 daily-report as-of replay for backfilled records and later-closed positions was fixed after this audit. Daily-report loaders now require both effective timestamps and `created_at` to be at or before the report as-of time, and positions are reconstructed as open only when they existed and were not closed at the report timestamp. Full-suite baseline after this fix: `270 passed in 5.09s`.
 
 ## Findings
 
@@ -163,9 +164,17 @@ Impact: a later `POSITION_RECONCILIATION_UNVERIFIED` or future reconciliation ev
 
 Status: fixed. The release gate now considers only reconciliation audit events created at or before `generated_at`, while still rejecting malformed rows whose embedded `checked_at` is after the gate or evidence packet.
 
+### P14 - Daily reports included backfilled future-created records
+
+Daily-report loaders filtered fills, exits, regime states, and risk snapshots by their effective timestamps, but not by row `created_at`. The open-position loader also relied on current `status = OPEN`, which meant a position closed later could disappear from an earlier as-of report.
+
+Impact: a report generated for an earlier timestamp could include backfilled records entered after that timestamp, while also losing a position that was open at that timestamp but later marked closed.
+
+Status: fixed. Daily-report database loaders now require `created_at <= as_of` for effective-time records. Open positions are reconstructed using `created_at`, `opened_at`, and `closed_at` relative to `as_of`, and as-of open rows are reported with `OPEN` status. Live fill persistence now stores `created_at` consistently with the fill event timestamp used by its audit events.
+
 ## Positive Controls Verified
 
-- Full pytest suite passed after remediation: `268 passed in 5.34s`.
+- Full pytest suite passed after remediation: `270 passed in 5.09s`.
 - Compile smoke check passed after remediation: `python -m compileall -q src tests`.
 - No broker SDK/network execution dependency was found in source dependencies.
 - Pre-pilot static tests already reject broker submission patterns, market-order flags set true, auto-execution flags set true, martingale requests, and fantasy mid-only backtests.
@@ -193,4 +202,4 @@ The original audit report was generated outside the project folder. This reposit
 
 ## Recommended Next Action
 
-The P1, P2, P3, P4, P5, P6, P7, P8, P9, P10, P11, P12, and P13 findings from this report are now remediated. Continue the forensic pass with the next highest-risk surface before adding new live-pilot functionality.
+The P1, P2, P3, P4, P5, P6, P7, P8, P9, P10, P11, P12, P13, and P14 findings from this report are now remediated. Continue the forensic pass with the next highest-risk surface before adding new live-pilot functionality.

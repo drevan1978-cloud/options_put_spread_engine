@@ -684,9 +684,10 @@ def _load_fills(connection: sqlite3.Connection, report_date_text: str, as_of_tex
         FROM fills
         WHERE substr(filled_at, 1, 10) = ?
           AND (? IS NULL OR filled_at <= ?)
+          AND (? IS NULL OR created_at <= ?)
         ORDER BY id
         """,
-        (report_date_text, as_of_text, as_of_text),
+        (report_date_text, as_of_text, as_of_text, as_of_text, as_of_text),
     ).fetchall()
     return [
         Fill(
@@ -705,6 +706,28 @@ def _load_fills(connection: sqlite3.Connection, report_date_text: str, as_of_tex
 
 
 def _load_open_positions(connection: sqlite3.Connection, as_of_text: str | None) -> list[Position]:
+    if as_of_text is None:
+        rows = connection.execute(
+            """
+            SELECT
+                id,
+                symbol,
+                opened_at,
+                closed_at,
+                quantity,
+                short_put_strike,
+                long_put_strike,
+                expiration_date,
+                status,
+                config_version,
+                created_at
+            FROM positions
+            WHERE upper(status) = 'OPEN'
+            ORDER BY id
+            """
+        ).fetchall()
+        return [_position_from_row(row, status=row[8]) for row in rows]
+
     rows = connection.execute(
         """
         SELECT
@@ -720,28 +743,18 @@ def _load_open_positions(connection: sqlite3.Connection, as_of_text: str | None)
             config_version,
             created_at
         FROM positions
-        WHERE upper(status) = 'OPEN'
-          AND (? IS NULL OR opened_at <= ?)
+        WHERE created_at <= ?
+          AND opened_at <= ?
+          AND (
+            upper(status) = 'OPEN'
+            OR (closed_at IS NOT NULL AND closed_at > ?)
+          )
+          AND (closed_at IS NULL OR closed_at > ?)
         ORDER BY id
         """,
-        (as_of_text, as_of_text),
+        (as_of_text, as_of_text, as_of_text, as_of_text),
     ).fetchall()
-    return [
-        Position(
-            id=row[0],
-            symbol=row[1],
-            opened_at=_parse_datetime(row[2]),
-            closed_at=None if row[3] is None else _parse_datetime(row[3]),
-            quantity=row[4],
-            short_put_strike=Decimal(row[5]),
-            long_put_strike=Decimal(row[6]),
-            expiration_date=_parse_date(row[7]),
-            status=row[8],
-            config_version=row[9],
-            created_at=_parse_datetime(row[10]),
-        )
-        for row in rows
-    ]
+    return [_position_from_row(row, status=OPEN_STATUS) for row in rows]
 
 
 def _load_exits(connection: sqlite3.Connection, report_date_text: str, as_of_text: str | None) -> list[Exit]:
@@ -758,9 +771,10 @@ def _load_exits(connection: sqlite3.Connection, report_date_text: str, as_of_tex
         FROM exits
         WHERE substr(evaluated_at, 1, 10) = ?
           AND (? IS NULL OR evaluated_at <= ?)
+          AND (? IS NULL OR created_at <= ?)
         ORDER BY id
         """,
-        (report_date_text, as_of_text, as_of_text),
+        (report_date_text, as_of_text, as_of_text, as_of_text, as_of_text),
     ).fetchall()
     return [
         Exit(
@@ -783,9 +797,10 @@ def _load_regime_states(connection: sqlite3.Connection, report_date_text: str, a
         FROM regime_states
         WHERE substr(as_of, 1, 10) <= ?
           AND (? IS NULL OR as_of <= ?)
+          AND (? IS NULL OR created_at <= ?)
         ORDER BY as_of ASC, id ASC
         """,
-        (report_date_text, as_of_text, as_of_text),
+        (report_date_text, as_of_text, as_of_text, as_of_text, as_of_text),
     ).fetchall()
     return [
         RegimeState(
@@ -808,9 +823,10 @@ def _load_risk_snapshots(connection: sqlite3.Connection, report_date_text: str, 
         FROM risk_snapshots
         WHERE substr(as_of, 1, 10) <= ?
           AND (? IS NULL OR as_of <= ?)
+          AND (? IS NULL OR created_at <= ?)
         ORDER BY as_of ASC, id ASC
         """,
-        (report_date_text, as_of_text, as_of_text),
+        (report_date_text, as_of_text, as_of_text, as_of_text, as_of_text),
     ).fetchall()
     return [
         RiskSnapshot(
@@ -853,6 +869,22 @@ def _load_audit_logs(connection: sqlite3.Connection, report_date_text: str, as_o
 
 def _parse_date(raw_value: str) -> date:
     return date.fromisoformat(raw_value)
+
+
+def _position_from_row(row: sqlite3.Row | tuple[object, ...], *, status: str) -> Position:
+    return Position(
+        id=row[0],
+        symbol=str(row[1]),
+        opened_at=_parse_datetime(str(row[2])),
+        closed_at=None if row[3] is None else _parse_datetime(str(row[3])),
+        quantity=int(row[4]),
+        short_put_strike=Decimal(str(row[5])),
+        long_put_strike=Decimal(str(row[6])),
+        expiration_date=_parse_date(str(row[7])),
+        status=status,
+        config_version=str(row[9]),
+        created_at=_parse_datetime(str(row[10])),
+    )
 
 
 def _parse_datetime(raw_value: str) -> datetime:
